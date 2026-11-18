@@ -65,19 +65,18 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:            # ✏�
         thinking={"type": "adaptive"}, tools=tools, messages=messages,
     )
 
-    answer = ""
     turns = 1
     while response.stop_reason == "tool_use" and turns < MAX_TOOL_CALLS:
-        messages.append({"role": "assistant", "content": text_of(response)})
+        # echo the full assistant turn (tool_use blocks included) so each tool_result has a match
+        messages.append({"role": "assistant", "content": response.content})
         messages.append({"role": "user", "content": tool_results(response)})
-        answer = text_of(response)
         response = client.messages.create(
             model=MODEL, max_tokens=4096, system=runtime_preamble() + SYSTEM_PROMPT + TONE_ADDENDUM,
             thinking={"type": "adaptive"}, tools=tools, messages=messages,
         )
         turns += 1
 
-    return answer
+    return text_of(response)
 
 
 def tool_list() -> List[Dict[str, Any]]:                   # ✏️ Build 2, step 2.2
@@ -119,17 +118,24 @@ def build_tools() -> List[Dict[str, Any]]:                 # ✏️ Build 1, ste
                 "type": "object",
                 "properties": {
                     "flight_no": {"type": "string"},
-                    "date": {"type": "string", "description": "MM/DD/YYYY"},
+                    "date": {"type": "string", "description": "Local flight date in ISO format YYYY-MM-DD, e.g. 2025-05-08. Not MM/DD/YYYY."},
                 },
                 "required": ["flight_no", "date"],
             },
         },
         {
             "name": "search_alternatives",
-            "description": "search",
+            "description": (
+                "Find rebooking options for a disrupted passenger on this booking. Use it "
+                "after lookup_booking, once the flight is known to be cancelled, delayed or "
+                "diverted, and before offering the customer any rebooking. Returns ranked "
+                "alternative itineraries, each with an option_id, flights and date. Quote "
+                "the option_id exactly when passing a choice to hold_seat or check_policy. "
+                "It only searches; it does not hold or book anything."
+            ),
             "input_schema": {
                 "type": "object",
-                "properties": {"pnr": {"type": "string"}},
+                "properties": {"pnr": {"type": "string", "description": "The booking's 6-character confirmation code (PNR), as given by the customer."}},
                 "required": ["pnr"],
             },
         },

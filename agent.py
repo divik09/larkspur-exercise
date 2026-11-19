@@ -9,6 +9,8 @@ Where you edit:   grep -n '✏' agent.py   (six marks, one per place)
 Steps and gates:  https://anthropicpartnerbasecamp.bts.com/
 """
 from __future__ import annotations
+import json
+import os
 from typing import Any, Dict, List
 from support import (MODEL, SYSTEM_PROMPT, call_local, execute_tool, mcp_client,
                      new_session, next_available_day, record_tool_result,
@@ -16,9 +18,73 @@ from support import (MODEL, SYSTEM_PROMPT, call_local, execute_tool, mcp_client,
 
 MAX_TOOL_CALLS = 8  # Larkspur's own build capped the loop here; then a human takes over.
 
+_ALTERNATIVES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "data", "americas", "alternatives_cache.json")
+
+
+def cheapest_alternative(origin: str, dest: str, date: str, cabin: str = "Y") -> Dict[str, Any]:
+    """Cheapest rebooking option for one route/date/cabin, read only from
+    data/americas/alternatives_cache.json. If the file has nothing for it, say so:
+    no guessing, no price made up. 'Cheapest' = lowest fare_difference_usd (the only
+    price in the data) among options with a seat left; ties go to Larkspur's own rank."""
+    key = "%s-%s|%s|%s" % (str(origin).upper(), str(dest).upper(), date, str(cabin).upper())
+    try:
+        with open(_ALTERNATIVES_FILE, encoding="utf-8") as fh:
+            entries = json.load(fh).get("entries", {})
+    except (OSError, ValueError) as exc:
+        return {"found": False, "message": "Fare data could not be read (%s). Do not guess a price." % exc}
+    entry = entries.get(key)
+    if not entry:
+        return {"found": False, "searched_key": key,
+                "message": "No fare data on file for %s. Say you can't see a price for that route "
+                           "and date; do not estimate one." % key}
+    open_options = [o for o in entry.get("options", []) if (o.get("seats_available") or 0) > 0]
+    if not open_options:
+        return {"found": False, "searched_key": key,
+                "message": "The file lists no option with a seat left for %s." % key}
+    best = min(open_options, key=lambda o: (o.get("fare_difference_usd", float("inf")),
+                                             o.get("rank", 999)))
+    tied = sum(1 for o in open_options
+               if o.get("fare_difference_usd") == best.get("fare_difference_usd"))
+    return {"found": True, "searched_key": key, "option_id": best["option_id"],
+            "flights": best.get("flights"), "date": best.get("date"),
+            "dep_local": best.get("dep_local"), "arr_local": best.get("arr_local"),
+            "cabin": best.get("cabin"), "seats_available": best.get("seats_available"),
+            "fare_difference_usd": best.get("fare_difference_usd"),
+            "options_with_seats": len(open_options), "options_tied_on_price": tied,
+            "note": "Price is the fare difference vs the original booking. If options_tied_on_price "
+                    "> 1 the options cost the same; this one is first by Larkspur's ranking."}
+
+
 TONE_ADDENDUM = ""                       # ✏️ Build 4, step 4.1, intelligence goal
-EXTRA_TOOLS: List[Dict[str, Any]] = []   # ✏️ Build 2, step 2.1: schemas for the tools you add
-LOCAL_TOOLS: Dict[str, Any] = {}         # ✏️ Build 2, step 2.1: the functions behind them
+EXTRA_TOOLS: List[Dict[str, Any]] = [    # ✏️ Build 2, step 2.1: schemas for the tools you add
+    {
+        "name": "cheapest_alternative",
+        "description": (
+            "Find the cheapest rebooking option on one route, date and cabin, read from the "
+            "fare file. Use it when the customer asks about the cheapest or lowest-cost way "
+            "to travel, after you know their origin, destination, original date and cabin "
+            "from lookup_booking. Returns one option (option_id, flights, times, seats left, "
+            "fare difference vs their original ticket) or found=false when the file has no "
+            "fare data for that route and date. If found=false, say you can't see a price; "
+            "never estimate one. It only reads fares; it does not hold or book."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "origin": {"type": "string", "description": "Origin airport IATA code, e.g. DEN."},
+                "dest": {"type": "string", "description": "Destination airport IATA code, e.g. AUS."},
+                "date": {"type": "string", "description": "Original travel date, ISO YYYY-MM-DD, e.g. 2025-05-08."},
+                "cabin": {"type": "string", "enum": ["Y", "J"],
+                          "description": "Y = Main cabin, J = First. Use the cabin on the booking."},
+            },
+            "required": ["origin", "dest", "date"],
+        },
+    },
+]
+LOCAL_TOOLS: Dict[str, Any] = {          # ✏️ Build 2, step 2.1: the functions behind them
+    "cheapest_alternative": cheapest_alternative,
+}
 
 
 def text_of(response) -> str:

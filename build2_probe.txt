@@ -1,1 +1,3 @@
-A passenger whose flight was cancelled asks when the next available day is to fly the same route. The agent should call next_available_day with the cancelled flight's origin and destination, and answer with the real date from the tool result, not a guess. The trace should show next_available_day called before the final reply.
+K7PQ2M
+Marchetti
+My flight was cancelled. What is the cheapest way to get rebooked on the same route and date, and under the fare rules for my ticket, can I change it or get a refund if I don't want the new flight?

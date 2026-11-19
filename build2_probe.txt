@@ -1,0 +1,1 @@
+A passenger whose flight was cancelled asks when the next available day is to fly the same route. The agent should call next_available_day with the cancelled flight's origin and destination, and answer with the real date from the tool result, not a guess. The trace should show next_available_day called before the final reply.
